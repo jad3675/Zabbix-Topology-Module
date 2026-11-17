@@ -1,0 +1,42 @@
+{
+	"manifest_version": 2.0,
+	"id": "topomap",
+	"name": "Topology",
+	"namespace": "TopoMap",
+	"version": "2.2.2",
+	"description": "Network topology from LLDP, CDP, forwarding tables and declared links, collected by the Topology templates. Monitoring > Topology.",
+	"actions": {
+		"topomap.view": {
+			"class": "TopoView",
+			"view": "topomap.view",
+			"layout": "layout.htmlpage"
+		},
+		"topomap.data": {
+			"class": "TopoData",
+			"layout": "layout.json"
+		},
+		"topomap.changes": {
+			"class": "TopoChanges",
+			"layout": "layout.json"
+		},
+		"topomap.settings": {
+			"class": "TopoSettings",
+			"view": "topomap.settings",
+			"layout": "layout.htmlpage"
+		},
+		"topomap.settings.save": {
+			"class": "TopoSettingsSave"
+		}
+	},
+	"assets": {
+		"css": [
+			"topomap.css"
+		],
+		"js": [
+			"vis-network.min.js",
+			"topomap.graph.js",
+			"topomap.page.js"
+		]
+	},
+	"config": {}
+}

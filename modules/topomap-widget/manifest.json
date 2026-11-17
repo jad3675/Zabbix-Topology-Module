@@ -1,0 +1,31 @@
+{
+	"manifest_version": 2.0,
+	"id": "topomap_widget",
+	"type": "widget",
+	"name": "Topology",
+	"namespace": "TopoMapWidget",
+	"version": "2.2.2",
+	"description": "Dashboard widget for the Topology module. Enable the Topology module as well.",
+	"widget": {
+		"name": "Topology",
+		"size": {
+			"width": 36,
+			"height": 8
+		},
+		"js_class": "WidgetTopoMap",
+		"refresh_rate": 300
+	},
+	"assets": {
+		"js": [
+			"class.widget.js"
+		],
+		"css": [
+			"widget.css"
+		]
+	},
+	"actions": {
+		"widget.topomap_widget.view": {
+			"class": "WidgetView"
+		}
+	}
+}

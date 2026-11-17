@@ -1,0 +1,6 @@
+bubble e3 2 devices
+bubble e4 40 devices
+bubble e5 1 device
+pve1  via switch gi14        behind=y hidden=0 macs=bc2411000001(Proxmox Server Solutions),bc2411000002(Proxmox Server Solutions)
+pve2  via switch gi15        behind=y hidden=40 macs=
+acc   gi5                    behind=n hidden=0 macs=001132aaaaaa(Synology)

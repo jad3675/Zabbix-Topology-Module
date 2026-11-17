@@ -1,0 +1,1171 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+  - uuid: 98234b0948dc47fea192a7a806e787ea
+    name: Templates/Network devices
+  templates:
+  - uuid: 022c033275a84bda91f3a0a25fac7a2f
+    template: Topology by SNMP
+    name: Topology by SNMP
+    description: 'Topology collection for the Topology frontend module: LLDP, port names and the forwarding database, polled with one small walk[] request per table (hourly for neighbors, every few hours for the rest) and stored only on change.
+
+
+      Link "Topology CDP by SNMP" to Cisco devices and "Topology ARP by SNMP" to layer 3 gateways.'
+    groups:
+    - name: Templates/Network devices
+    items:
+    - uuid: dc1a7dfa5e23406599de47c01da8e071
+      name: 'LLDP: Local system walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[1.0.8802.1.1.2.1.3]'
+      key: topo.lldp.local.walk
+      delay: '{$TOPO.LLDP.LOCAL.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: 'LLDP-MIB lldpLocalSystemData, walked as one subtree. A single OID per request is the shape every agent answers; wide multi-column requests are dropped by some (MikroTik, small-business switches). Not stored.'
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: 0775389733b8466fb5245709c73c70f6
+      name: 'LLDP: Local system'
+      type: DEPENDENT
+      key: topo.lldp.local
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: 'Own chassis ID, system name and LLDP port numbers. Used by the Topology module to recognise this device in neighbor tables.'
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          var B = '1.0.8802.1.1.2.1.3';
+          var rows = tmParse(value), r, s, i, parts, out = {cst: null, cid: '', sys: '', p: {}}, cidE = null, pst = {}, pidE = {};
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if ((s = tmSuffix(r.oid, B + '.1')) !== null) out.cst = tmInt(r.val);
+              else if ((s = tmSuffix(r.oid, B + '.2')) !== null) cidE = r;
+              else if ((s = tmSuffix(r.oid, B + '.3')) !== null) out.sys = r.val;
+              else if ((s = tmSuffix(r.oid, B + '.7.1.2')) !== null) pst[s] = tmInt(r.val);
+              else if ((s = tmSuffix(r.oid, B + '.7.1.3')) !== null) pidE[s] = r;
+              else if ((s = tmSuffix(r.oid, B + '.7.1.4')) !== null) { out.p[s] = out.p[s] || {}; out.p[s].d = r.val; }
+          }
+          if (cidE) out.cid = tmLldpId(cidE, out.cst, 'c');
+          for (s in pidE) {
+              if (!pidE.hasOwnProperty(s)) continue;
+              out.p[s] = out.p[s] || {};
+              out.p[s].id = tmLldpId(pidE[s], pst[s], 'p');
+          }
+          var ports = {}, k = tmKeys(out.p).sort(tmNumSort);
+          for (i = 0; i < k.length; i++) ports[k[i]] = out.p[k[i]];
+          out.p = ports;
+          return JSON.stringify(out);
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.lldp.local.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    - uuid: ddc5ca36630844bc8502241d36fb8e79
+      name: 'LLDP: Remote table walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[1.0.8802.1.1.2.1.4]'
+      key: topo.lldp.remote.walk
+      delay: '{$TOPO.LLDP.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: 'LLDP-MIB lldpRemoteSystemsData, walked as one subtree (see the local walk for why). Only the columns the map needs are kept when parsed; sysDesc is cut to 48 characters. Not stored.'
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: 97a01c4100d746249b4272a49127ef64
+      name: 'LLDP: Neighbors'
+      type: DEPENDENT
+      key: topo.lldp.neighbors
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: Normalised LLDP neighbor list. Stored only on change plus heartbeat.
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          var R = '1.0.8802.1.1.2.1.4.1.1', M = '1.0.8802.1.1.2.1.4.2.1.3';
+          var rows = tmParse(value), nb = {}, r, s, i, parts, key, col, n;
+          function get(k) { if (!nb[k]) nb[k] = {lp: k.split('.')[0]}; return nb[k]; }
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if ((s = tmSuffix(r.oid, M)) !== null) {
+                  parts = s.split('.');
+                  if (parts.length < 7) continue;
+                  key = parts[1] + '.' + parts[2];
+                  var a = parts.slice(3);
+                  if (a[0] === '1' && a[1] === '4' && a.length >= 6) a = a.slice(2, 6);
+                  else if (a[0] === '1' && a.length === 5) a = a.slice(1, 5);
+                  else continue;
+                  n = get(key);
+                  n.ip = n.ip || a.join('.');
+                  continue;
+              }
+              if ((s = tmSuffix(r.oid, R)) === null) continue;
+              parts = s.split('.');
+              if (parts.length < 4) continue;
+              col = parts[0];
+              key = parts[2] + '.' + parts[3];
+              n = get(key);
+              if (col === '4') n.cst = tmInt(r.val);
+              else if (col === '5') n._c = r;
+              else if (col === '6') n.pst = tmInt(r.val);
+              else if (col === '7') n._p = r;
+              else if (col === '8') n.pd = r.val;
+              else if (col === '9') n.sys = r.val;
+              else if (col === '10') n.sd = r.val.split('\n')[0].substring(0, 48);
+              else if (col === '12') {
+                  var b = tmBytes(r), c = '', bits = b.length ? b[0] : 0;
+                  if (bits & 0x20) c += 'B';
+                  if (bits & 0x10) c += 'W';
+                  if (bits & 0x08) c += 'R';
+                  if (bits & 0x04) c += 'T';
+                  if (bits & 0x01) c += 'S';
+                  n.cap = c;
+              }
+          }
+          var list = [];
+          for (key in nb) {
+              if (!nb.hasOwnProperty(key)) continue;
+              n = nb[key];
+              if (n._c) n.cid = tmLldpId(n._c, n.cst, 'c');
+              if (n._p) n.pid = tmLldpId(n._p, n.pst, 'p');
+              delete n._c; delete n._p;
+              if (!n.cid && !n.sys) continue;
+              list.push(n);
+          }
+          list.sort(function (x, y) { return tmNumSort(x.lp, y.lp) || ((x.cid || '') < (y.cid || '') ? -1 : 1); });
+          return JSON.stringify(list);
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.lldp.remote.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    - uuid: 487e34fb5b614e3ea2a218d58f377fa2
+      name: 'LLDP: Infrastructure neighbors'
+      type: DEPENDENT
+      key: topo.lldp.infra
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: Bridge/router/AP neighbors only (phones and stations removed). Drives the change trigger.
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // Infrastructure-only neighbor fingerprint: drops phones and stations so reboots
+          // of desk gear do not fire the change trigger.
+          var l = JSON.parse(value), o = [], i, n;
+          for (i = 0; i < l.length; i++) {
+              n = l[i];
+              if (n.cap && (n.cap.indexOf('T') !== -1 || !/[BRW]/.test(n.cap))) continue;
+              o.push(n.lp + ' ' + (n.sys || n.cid || '?') + ' ' + (n.pid || n.pd || ''));
+          }
+          return o.sort().join('\n');
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.lldp.neighbors
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+      triggers:
+      - uuid: 596eb555e1f94ebab9e416918f3a8abc
+        expression: change(/Topology by SNMP/topo.lldp.infra)=1
+        name: 'LLDP: Infrastructure neighbors changed on {HOST.NAME}'
+        priority: INFO
+        recovery_mode: NONE
+        manual_close: 'YES'
+        description: 'A switch, router or AP neighbor appeared, disappeared or moved ports. Compare the last two values of "LLDP: Infrastructure neighbors" or open Monitoring > Topology > Changes. Close manually.'
+        tags:
+        - tag: scope
+          value: notice
+        - tag: component
+          value: topology
+    - uuid: 67cca1a8e6004d5b9a5502c1620fef59
+      name: 'Interfaces: Name walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[1.3.6.1.2.1.31.1.1.1.1,1.3.6.1.2.1.2.2.1.2,1.3.6.1.2.1.31.1.1.1.18]'
+      key: topo.ifnames.walk
+      delay: '{$TOPO.IFNAMES.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: 'ifName (ifDescr fallback) and ifAlias, so the module can label ports without depending on interface LLD. Near-static, so the parsed value is rarely stored. Not stored itself.'
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: 6714d6205b6e433f9b87cece68fdcc6f
+      name: 'Interfaces: Names'
+      type: DEPENDENT
+      key: topo.ifnames
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: 'ifIndex to [name, description]. Port status and speed come from the host interface items, not from here.'
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          // Input: walk of ifName, ifDescr, ifAlias.
+          // Output: {ifIndex: [name, alias]} sorted by ifIndex. Only near-static data, so the
+          // value is stored on change and rarely changes. Status and speed are read from the
+          // host's existing interface items by the module, not collected here.
+          var MAX_BYTES = tmMacro('{$TOPO.VALUE.MAX.BYTES}', 60000);
+          var NAME = '1.3.6.1.2.1.31.1.1.1.1', DESCR = '1.3.6.1.2.1.2.2.1.2', ALIAS = '1.3.6.1.2.1.31.1.1.1.18';
+          var rows = tmParse(value), p = {}, r, s, i;
+          function get(k) { return p[k] || (p[k] = {n: '', d: '', a: ''}); }
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if ((s = tmSuffix(r.oid, NAME)) !== null) get(s).n = r.val;
+              else if ((s = tmSuffix(r.oid, DESCR)) !== null) get(s).d = r.val;
+              else if ((s = tmSuffix(r.oid, ALIAS)) !== null) get(s).a = r.val;
+          }
+          var k = tmKeys(p).sort(tmNumSort), out = {}, x;
+          for (i = 0; i < k.length; i++) {
+              x = p[k[i]];
+              out[k[i]] = x.a !== '' ? [x.n !== '' ? x.n : x.d, x.a] : [x.n !== '' ? x.n : x.d];
+          }
+          var json = JSON.stringify(out);
+          if (json.length > MAX_BYTES) {
+              for (i = 0; i < k.length; i++) out[k[i]] = [out[k[i]][0]];
+              json = JSON.stringify(out);
+          }
+          return json;
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.ifnames.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    - uuid: c165e1bdfed14cd79421e8b04e75c085
+      name: 'FDB: Forwarding table walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[{$TOPO.FDB.OID},1.3.6.1.2.1.17.1.4.1.2]'
+      key: topo.fdb.walk
+      delay: '{$TOPO.FDB.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: One column of the forwarding database plus the bridge-port to ifIndex map. Not stored.
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: e0290d9dc15e4a23af918494d56d283a
+      name: 'FDB: Edge ports'
+      type: DEPENDENT
+      key: topo.fdb.edge
+      delay: '0'
+      history: '{$TOPO.FDB.HISTORY}'
+      value_type: TEXT
+      description: 'MACs per port for ports with {$TOPO.FDB.EDGE.MAX} or fewer MACs; busier ports are kept as counts only.'
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          // Input: walk of an FDB port column (Q-BRIDGE or BRIDGE-MIB) + dot1dBasePortIfIndex.
+          // Output: {"e":{ifIndex:[mac,...]}, "u":{ifIndex:count}, "t":total}
+          var EDGE_MAX = tmMacro('{$TOPO.FDB.EDGE.MAX}', 8);
+          var MAX_BYTES = tmMacro('{$TOPO.VALUE.MAX.BYTES}', 60000);
+          var BP = '1.3.6.1.2.1.17.1.4.1.2';
+          var rows = tmParse(value), map = {}, ports = {}, seen = {}, r, s, i, port, mac, total = 0;
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if ((s = tmSuffix(r.oid, BP)) !== null) { map[s] = String(tmInt(r.val)); continue; }
+          }
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if (r.oid.indexOf(BP + '.') === 0) continue;
+              port = tmInt(r.val);
+              if (!port) continue;
+              mac = tmMacFromIdx(r.oid.split('.'));
+              if (!mac || mac === '000000000000') continue;
+              port = map[port] || ('bp' + port);
+              if (seen[port + mac]) continue;
+              seen[port + mac] = 1;
+              total++;
+              (ports[port] || (ports[port] = [])).push(mac);
+          }
+          var out = {e: {}, u: {}, t: total}, k = tmKeys(ports).sort(tmNumSort);
+          for (i = 0; i < k.length; i++) {
+              if (ports[k[i]].length > EDGE_MAX) out.u[k[i]] = ports[k[i]].length;
+              else out.e[k[i]] = ports[k[i]].sort();
+          }
+          var json = JSON.stringify(out);
+          if (json.length > MAX_BYTES) {
+              // Size guard: demote the busiest edge ports to counts until it fits.
+              var ek = tmKeys(out.e).sort(function (a, c) { return out.e[c].length - out.e[a].length; });
+              var est = json.length;
+              for (i = 0; i < ek.length && est > MAX_BYTES; i++) {
+                  est -= out.e[ek[i]].length * 15;
+                  out.u[ek[i]] = out.e[ek[i]].length;
+                  delete out.e[ek[i]];
+              }
+              out.x = 1;
+              json = JSON.stringify(out);
+          }
+          return json;
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.fdb.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    tags:
+    - tag: class
+      value: network
+    - tag: target
+      value: topology
+    macros:
+    - macro: '{$TOPO.HEARTBEAT}'
+      value: 12h
+      description: 'Unchanged topology values are stored at most this often. Keep it below Administration > General > GUI > "Max history display period" or the map loses data.'
+    - macro: '{$TOPO.HISTORY}'
+      value: 14d
+      description: History retention for topology text items. Only changes plus heartbeats are stored.
+    - macro: '{$TOPO.WALK.TIMEOUT}'
+      value: 15s
+      description: Per-item timeout for topology walks.
+    - macro: '{$TOPO.VALUE.MAX.BYTES}'
+      value: '60000'
+      description: Hard cap on stored JSON size per value.
+    - macro: '{$TOPO.LLDP.INTERVAL}'
+      value: 1h
+      description: LLDP remote table poll interval.
+    - macro: '{$TOPO.LLDP.LOCAL.INTERVAL}'
+      value: 6h
+      description: LLDP local data poll interval.
+    - macro: '{$TOPO.IFNAMES.INTERVAL}'
+      value: 6h
+      description: Port names and descriptions poll interval.
+    - macro: '{$TOPO.FDB.INTERVAL}'
+      value: 4h
+      description: 'Forwarding table poll interval. This is the only walk whose size grows with the network, so it runs rarely. Shorten it on switches where you want endpoint moves noticed sooner.'
+    - macro: '{$TOPO.FDB.OID}'
+      value: 1.3.6.1.2.1.17.7.1.2.2.1.2
+      description: FDB port column. Default Q-BRIDGE dot1qTpFdbPort. Set to 1.3.6.1.2.1.17.4.3.1.2 (dot1dTpFdbPort) on devices without Q-BRIDGE.
+    - macro: '{$TOPO.FDB.HISTORY}'
+      value: 3d
+      description: 'History for the edge-port MAC list. Endpoint churn changes it often, so keep this short.'
+    - macro: '{$TOPO.FDB.EDGE.MAX}'
+      value: '8'
+      description: Ports with more MACs than this are treated as uplinks and stored as a count only.
+  - uuid: 89df7af66f684c85ba6de2f0c397e542
+    template: Topology CDP by SNMP
+    name: Topology CDP by SNMP
+    description: CDP neighbor collection for the Topology module. Link to Cisco devices alongside "Topology by SNMP".
+    groups:
+    - name: Templates/Network devices
+    items:
+    - uuid: 6fac8a5912bd4687aefba3943a2f5a48
+      name: 'CDP: Cache walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[1.3.6.1.4.1.9.9.23.1.2.1]'
+      key: topo.cdp.walk
+      delay: '{$TOPO.CDP.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: 'CISCO-CDP-MIB cdpCacheTable, walked as one subtree. Only address, device ID, port, platform and capabilities are kept when parsed. Not stored.'
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: 1fa473ae7b3f4021be925526d321b673
+      name: 'CDP: Neighbors'
+      type: DEPENDENT
+      key: topo.cdp.neighbors
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: 'Normalised CDP neighbor list, keyed by local ifIndex.'
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          var C = '1.3.6.1.4.1.9.9.23.1.2.1.1';
+          var rows = tmParse(value), nb = {}, r, s, i, parts, key, n, b;
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              if ((s = tmSuffix(r.oid, C)) === null) continue;
+              parts = s.split('.');
+              if (parts.length < 3) continue;
+              key = parts[1] + '.' + parts[2];
+              n = nb[key] || (nb[key] = {lp: parts[1]});
+              switch (parts[0]) {
+                  case '4':
+                      b = tmBytes(r);
+                      if (b.length === 4) n.ip = b.join('.');
+                      break;
+                  case '6': n.sys = r.val; break;
+                  case '7': n.pid = r.val; break;
+                  case '8': n.plat = r.val.split('\n')[0].substring(0, 64); break;
+                  case '9':
+                      b = tmBytes(r);
+                      var v = 0;
+                      if (b.length === 4) v = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0;
+                      else v = tmInt(r.val) || 0;
+                      var c = '';
+                      if (v & 0x0e) c += 'B';
+                      if (v & 0x01) c += 'R';
+                      if (v & 0x80) c += 'T';
+                      if (v & 0x10) c += 'S';
+                      n.cap = c;
+                      break;
+              }
+          }
+          var list = [];
+          for (key in nb) { if (nb.hasOwnProperty(key) && nb[key].sys) list.push(nb[key]); }
+          list.sort(function (x, y) { return tmNumSort(x.lp, y.lp) || (x.sys < y.sys ? -1 : 1); });
+          return JSON.stringify(list);
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.cdp.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    - uuid: cdadce534cc34cca8bf7b5c61021d76f
+      name: 'CDP: Infrastructure neighbors'
+      type: DEPENDENT
+      key: topo.cdp.infra
+      delay: '0'
+      history: '{$TOPO.HISTORY}'
+      value_type: TEXT
+      description: Bridge/router neighbors only (phones and hosts removed). Drives the change trigger.
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // Infrastructure-only neighbor fingerprint: drops phones and stations so reboots
+          // of desk gear do not fire the change trigger.
+          var l = JSON.parse(value), o = [], i, n;
+          for (i = 0; i < l.length; i++) {
+              n = l[i];
+              if (n.cap && (n.cap.indexOf('T') !== -1 || !/[BRW]/.test(n.cap))) continue;
+              o.push(n.lp + ' ' + (n.sys || n.cid || '?') + ' ' + (n.pid || n.pd || ''));
+          }
+          return o.sort().join('\n');
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.cdp.neighbors
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+      triggers:
+      - uuid: 3d088cb12c0f45b49dfc0bdc9fbaa45e
+        expression: change(/Topology CDP by SNMP/topo.cdp.infra)=1
+        name: 'CDP: Infrastructure neighbors changed on {HOST.NAME}'
+        priority: INFO
+        recovery_mode: NONE
+        manual_close: 'YES'
+        description: 'A switch or router CDP neighbor appeared, disappeared or moved ports. Close manually.'
+        tags:
+        - tag: scope
+          value: notice
+        - tag: component
+          value: topology
+    tags:
+    - tag: class
+      value: network
+    - tag: target
+      value: topology
+    macros:
+    - macro: '{$TOPO.HEARTBEAT}'
+      value: 12h
+      description: 'Unchanged topology values are stored at most this often. Keep it below Administration > General > GUI > "Max history display period" or the map loses data.'
+    - macro: '{$TOPO.HISTORY}'
+      value: 14d
+      description: History retention for topology text items. Only changes plus heartbeats are stored.
+    - macro: '{$TOPO.WALK.TIMEOUT}'
+      value: 15s
+      description: Per-item timeout for topology walks.
+    - macro: '{$TOPO.VALUE.MAX.BYTES}'
+      value: '60000'
+      description: Hard cap on stored JSON size per value.
+    - macro: '{$TOPO.CDP.INTERVAL}'
+      value: 1h
+      description: CDP cache poll interval.
+  - uuid: 90fc7b2528ac4b02911862445d9e230d
+    template: Topology ARP by SNMP
+    name: Topology ARP by SNMP
+    description: 'ARP collection for the Topology module, so endpoints get IP addresses. Link only to layer 3 gateways (cores, firewalls that answer SNMP), not every switch.'
+    groups:
+    - name: Templates/Network devices
+    items:
+    - uuid: 2bb2062e9fa745fe8418b461efea8fde
+      name: 'ARP: Table walk'
+      type: SNMP_AGENT
+      snmp_oid: 'walk[{$TOPO.ARP.OID}]'
+      key: topo.arp.walk
+      delay: '{$TOPO.ARP.INTERVAL}'
+      history: '0'
+      value_type: TEXT
+      trends: '0'
+      description: 'IPv4 ARP table, one column only. Not stored.'
+      tags:
+      - tag: component
+        value: topology
+      timeout: '{$TOPO.WALK.TIMEOUT}'
+    - uuid: b084f60dba834d8e8b30e107a3aff46a
+      name: 'ARP: IP to MAC'
+      type: DEPENDENT
+      key: topo.arp
+      delay: '0'
+      history: '{$TOPO.ARP.HISTORY}'
+      value_type: TEXT
+      description: 'IPv4 to MAC map filtered by {$TOPO.ARP.NET.MATCH}.'
+      preprocessing:
+      - type: JAVASCRIPT
+        parameters:
+        - |
+          // ---- shared walk helpers (ES5 / Duktape) ----
+          function tmParse(text) {
+              var lines = String(text).split(/\r?\n/), out = [], cur = null, i, m, v;
+              var re = /^\.?((?:\d+\.)+\d+)\s*=\s*(?:([A-Za-z0-9\-]+):\s*)?(.*)$/;
+              for (i = 0; i < lines.length; i++) {
+                  m = re.exec(lines[i]);
+                  if (m) {
+                      cur = {oid: m[1], type: m[2] || '', val: m[3]};
+                      out.push(cur);
+                  }
+                  else if (cur && lines[i] !== '') {
+                      cur.val += (cur.type === 'Hex-STRING' ? ' ' : '\n') + lines[i];
+                  }
+              }
+              var res = [];
+              for (i = 0; i < out.length; i++) {
+                  v = out[i].val;
+                  if (/^No (Such|more)/.test(v) || /^No Such/.test(out[i].type)) continue;
+                  if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length - 1) === '"') {
+                      v = v.substring(1, v.length - 1).replace(/\\(["\\])/g, '$1');
+                  }
+                  out[i].val = v;
+                  res.push(out[i]);
+              }
+              return res;
+          }
+          function tmSuffix(oid, prefix) {
+              if (oid.indexOf(prefix + '.') !== 0) return null;
+              return oid.substring(prefix.length + 1);
+          }
+          function tmInt(v) {
+              var m = /\((-?\d+)\)/.exec(v) || /-?\d+/.exec(v);
+              return m ? parseInt(m[1] !== undefined ? m[1] : m[0], 10) : null;
+          }
+          function tmBytes(e) {
+              var b = [], i, s = e.val;
+              if (e.type === 'Hex-STRING') {
+                  s = s.replace(/[^0-9A-Fa-f]/g, '');
+                  for (i = 0; i + 1 < s.length; i += 2) b.push(parseInt(s.substr(i, 2), 16));
+                  return b;
+              }
+              // A server or proxy that has MIB files loaded prints binary values the way the MIB's
+              // display hint says, as text: a MAC arrives as STRING "00:1a:2b:3c:4d:5e" (or unpadded,
+              // "0:50:56:1:2:3") where a server without MIBs gives Hex-STRING. Same bytes either way.
+              if (/^[0-9A-Fa-f]{1,2}([:\- ][0-9A-Fa-f]{1,2})+$/.test(s)) {
+                  var parts = s.split(/[:\- ]/);
+                  for (i = 0; i < parts.length; i++) b.push(parseInt(parts[i], 16));
+                  return b;
+              }
+              for (i = 0; i < s.length; i++) b.push(s.charCodeAt(i) & 0xff);
+              return b;
+          }
+          function tmHex(b) {
+              var s = '', i, h;
+              for (i = 0; i < b.length; i++) { h = b[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmPrintable(b) {
+              for (var i = 0; i < b.length; i++) { if (b[i] < 32 || b[i] > 126) return false; }
+              return b.length > 0;
+          }
+          function tmText(e) {
+              var b = tmBytes(e);
+              if (e.type !== 'Hex-STRING') return e.val;
+              while (b.length && b[b.length - 1] === 0) b.pop();
+              if (tmPrintable(b)) { var s = ''; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return s; }
+              return tmHex(b);
+          }
+          // LLDP chassis/port id decode. kind 'c' chassis (mac=4, net=5) / 'p' port (mac=3, net=4)
+          function tmLldpId(e, subtype, kind) {
+              var b = tmBytes(e);
+              var macSt = kind === 'c' ? 4 : 3, netSt = kind === 'c' ? 5 : 4;
+              if (subtype === macSt && b.length === 6) return tmHex(b);
+              if (subtype === netSt && b.length === 5 && b[0] === 1) return b[1] + '.' + b[2] + '.' + b[3] + '.' + b[4];
+              if (e.type === 'Hex-STRING' && b.length === 6 && !tmPrintable(b)) return tmHex(b);
+              return tmText(e);
+          }
+          function tmMacFromIdx(parts) {
+              if (parts.length < 6) return null;
+              var p = parts.slice(parts.length - 6), s = '', i, h;
+              for (i = 0; i < 6; i++) { h = parseInt(p[i], 10).toString(16); s += (h.length < 2 ? '0' : '') + h; }
+              return s;
+          }
+          function tmMacro(v, def) {
+              var n = parseInt(v, 10);
+              return isNaN(n) ? def : n;
+          }
+          function tmKeys(o) { var k = []; for (var x in o) if (o.hasOwnProperty(x)) k.push(x); return k; }
+          function tmNumSort(a, b) { return (parseInt(a, 10) - parseInt(b, 10)) || (a < b ? -1 : a > b ? 1 : 0); }
+          // ---- end helpers ----
+
+          // Input: walk of ipNetToMediaPhysAddress or ipNetToPhysicalPhysAddress. IPv4 only.
+          // Output: {ip: mac} sorted, filtered by {$TOPO.ARP.NET.MATCH}, capped by {$TOPO.VALUE.MAX.BYTES}.
+          var MATCH = '{$TOPO.ARP.NET.MATCH}';
+          var MAX_BYTES = tmMacro('{$TOPO.VALUE.MAX.BYTES}', 60000);
+          var re = null;
+          if (MATCH.charAt(0) !== '{' && MATCH !== '') { try { re = new RegExp(MATCH); } catch (e) { re = null; } }
+          var M1 = '1.3.6.1.2.1.4.22.1.2', M2 = '1.3.6.1.2.1.4.35.1.4';
+          var rows = tmParse(value), out = {}, r, s, i, p, ip, b;
+          for (i = 0; i < rows.length; i++) {
+              r = rows[i];
+              ip = null;
+              if ((s = tmSuffix(r.oid, M1)) !== null) {
+                  p = s.split('.');
+                  if (p.length === 5) ip = p.slice(1).join('.');
+              }
+              else if ((s = tmSuffix(r.oid, M2)) !== null) {
+                  p = s.split('.');
+                  if (p.length === 7 && p[1] === '1' && p[2] === '4') ip = p.slice(3).join('.');
+              }
+              if (!ip || (re && !re.test(ip))) continue;
+              b = tmBytes(r);
+              if (b.length !== 6) continue;
+              var mac = tmHex(b);
+              if (mac === '000000000000' || mac === 'ffffffffffff') continue;
+              out[ip] = mac;
+          }
+          function ipNum(a) { var q = a.split('.'); return ((+q[0]) * 16777216) + ((+q[1]) << 16) + ((+q[2]) << 8) + (+q[3]); }
+          var k = tmKeys(out).sort(function (a, c) { return ipNum(a) - ipNum(c); }), res = {}, len = 2;
+          for (i = 0; i < k.length; i++) {
+              len += k[i].length + 20;
+              if (len > MAX_BYTES) { res['_truncated'] = String(k.length - i); break; }
+              res[k[i]] = out[k[i]];
+          }
+          return JSON.stringify(res);
+      - type: DISCARD_UNCHANGED_HEARTBEAT
+        parameters:
+        - '{$TOPO.HEARTBEAT}'
+      master_item:
+        key: topo.arp.walk
+      tags:
+      - tag: component
+        value: topology
+      trends: '0'
+    tags:
+    - tag: class
+      value: network
+    - tag: target
+      value: topology
+    macros:
+    - macro: '{$TOPO.HEARTBEAT}'
+      value: 12h
+      description: 'Unchanged topology values are stored at most this often. Keep it below Administration > General > GUI > "Max history display period" or the map loses data.'
+    - macro: '{$TOPO.HISTORY}'
+      value: 14d
+      description: History retention for topology text items. Only changes plus heartbeats are stored.
+    - macro: '{$TOPO.WALK.TIMEOUT}'
+      value: 15s
+      description: Per-item timeout for topology walks.
+    - macro: '{$TOPO.VALUE.MAX.BYTES}'
+      value: '60000'
+      description: Hard cap on stored JSON size per value.
+    - macro: '{$TOPO.ARP.INTERVAL}'
+      value: 30m
+      description: ARP poll interval.
+    - macro: '{$TOPO.ARP.HISTORY}'
+      value: 3d
+      description: History for the ARP map.
+    - macro: '{$TOPO.ARP.OID}'
+      value: 1.3.6.1.2.1.4.22.1.2
+      description: ipNetToMediaPhysAddress. Use 1.3.6.1.2.1.4.35.1.4 (ipNetToPhysicalPhysAddress) where the old table is missing.
+    - macro: '{$TOPO.ARP.NET.MATCH}'
+      value: ''
+      description: 'Optional regex on IPv4 addresses to keep, e.g. ^10[.](20|21)[.] (use [.] rather than backslashes). Empty keeps all, subject to the size cap.'

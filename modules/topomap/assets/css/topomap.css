@@ -1,0 +1,200 @@
+/* Topology module. Inherits Zabbix theme colours; only borders and tints are added. */
+
+.topomap-filter-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 10px 18px;
+	padding: 10px 0 12px;
+}
+.topomap-field { display: flex; flex-direction: column; gap: 4px; }
+.topomap-field > label { opacity: .8; }
+.topomap-check { justify-content: flex-end; padding-bottom: 4px; }
+
+.topomap-root {
+	display: flex;
+	flex-direction: column;
+	min-height: 420px;
+	border: 1px solid rgba(127, 127, 127, .28);
+}
+.topomap-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 8px;
+	padding: 6px 8px;
+	border-bottom: 1px solid rgba(127, 127, 127, .28);
+}
+.topomap-spacer { flex: 1 1 auto; }
+.topomap-seg { display: inline-flex; }
+.topomap-seg > button { margin: 0; border-radius: 0; }
+.topomap-seg > button:first-child { border-radius: 2px 0 0 2px; }
+.topomap-seg > button:last-child { border-radius: 0 2px 2px 0; }
+.topomap-seg > button + button { margin-left: -1px; }
+.topomap-toolbar .topomap-on,
+.topomap-chip.topomap-on {
+	box-shadow: inset 0 -2px 0 currentColor;
+	font-weight: bold;
+}
+.topomap-toolbar button:focus-visible,
+.topomap-side a:focus-visible,
+.topomap-side button:focus-visible { outline: 2px solid #4796c4; outline-offset: 1px; }
+.topomap-select { height: 24px; }
+
+.topomap-search-wrap { position: relative; }
+.topomap-search { width: 220px; }
+.topomap-results {
+	position: absolute;
+	z-index: 20;
+	top: 100%;
+	left: 0;
+	width: 380px;
+	max-height: 360px;
+	overflow: auto;
+	margin-top: 2px;
+	background: inherit;
+	background-color: var(--topomap-surface, #fff);
+	border: 1px solid rgba(127, 127, 127, .4);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, .18);
+}
+html[color-scheme="dark"] .topomap-results,
+html[theme="dark-theme"] .topomap-results,
+html[theme="hc-dark"] .topomap-results { --topomap-surface: #2b2b2b; }
+.topomap-results ul { list-style: none; margin: 0; padding: 4px 0; }
+.topomap-results li button { display: block; width: 100%; text-align: left; padding: 5px 10px; }
+.topomap-results li button:hover { background: rgba(127, 127, 127, .12); }
+
+.topomap-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.topomap-pane { position: relative; flex: 1 1 auto; min-width: 0; }
+.topomap-canvas { position: absolute; inset: 0 0 30px 0; }
+.topomap-legend {
+	position: absolute;
+	left: 8px;
+	bottom: 8px;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	font-size: 11px;
+	opacity: .85;
+	pointer-events: none;
+}
+.topomap-key { display: inline-flex; align-items: center; gap: 5px; }
+.topomap-key i { display: inline-block; }
+.topomap-k-box { width: 14px; height: 9px; border: 1px solid #8fa1ab; border-radius: 2px; }
+.topomap-k-un { width: 8px; height: 8px; border: 1px dashed #8fa1ab; }
+.topomap-k-line { width: 18px; border-top: 2px solid #a9b6bf; }
+.topomap-k-box.topomap-k-dash { border-style: dashed; }
+.topomap-k-line.topomap-k-dash { border-top-style: dashed; }
+.topomap-status {
+	position: absolute;
+	right: 8px;
+	bottom: 8px;
+	font-size: 11px;
+	opacity: .75;
+	pointer-events: none;
+}
+
+.topomap-side {
+	flex: 0 0 360px;
+	max-width: 42%;
+	overflow: auto;
+	padding: 10px 12px;
+	border-left: 1px solid rgba(127, 127, 127, .28);
+}
+.topomap-side h4 { margin: 0 0 4px; font-size: 14px; }
+.topomap-side h5 { margin: 14px 0 6px; font-size: 12px; }
+.topomap-side p { margin: 6px 0; line-height: 1.45; }
+.topomap-meta { opacity: .75; margin-bottom: 6px; }
+.topomap-links { display: flex; gap: 12px; margin: 4px 0 8px; }
+.topomap-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; opacity: .8; margin-bottom: 4px; }
+.topomap-muted { opacity: .7; }
+.topomap-mono { font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 11px; }
+.topomap-port { white-space: nowrap; }
+.topomap-nowrap { white-space: nowrap; }
+.topomap-pad { padding: 10px; }
+.topomap-list { margin: 0; padding-left: 16px; }
+.topomap-list li { margin: 3px 0; }
+.topomap-dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 8px 0; }
+.topomap-dl dt { opacity: .7; }
+.topomap-dl dd { margin: 0; }
+.topomap-ports { width: 100%; margin-top: 6px; }
+.topomap-ports td { vertical-align: top; }
+/* Only the outer Devices column; the nested MAC table must be free to wrap. */
+.topomap-ports > tbody > tr > td:last-child,
+.topomap-ports > tbody > tr > td:last-child > .btn-link { white-space: nowrap; }
+.topomap-macs td { white-space: normal; }
+.topomap-sub > td { padding-top: 0; }
+.topomap-macs { width: 100%; font-size: 11px; }
+.topomap-macs td { padding: 2px 6px 2px 0; border: 0; }
+.topomap-hit > td { background: rgba(71, 150, 196, .14); }
+.topomap-sev { margin-left: 8px; font-size: 11px; padding: 0 5px; border-radius: 2px; color: #1f2c33; }
+.topomap-sev-0 { background: #97AAB3; }
+.topomap-sev-1 { background: #7499FF; }
+.topomap-sev-2 { background: #FFC859; }
+.topomap-sev-3 { background: #FFA059; }
+.topomap-sev-4 { background: #E97659; }
+.topomap-sev-5 { background: #E45959; }
+.topomap-warn { margin: 6px 0; padding: 6px 10px 6px 24px; border-left: 3px solid #FFA059; background: rgba(255, 160, 89, .1); }
+.topomap-warn-inline { color: #e07a2e; }
+.topomap-error { padding: 8px 10px; border-left: 3px solid #E45959; background: rgba(228, 89, 89, .1); }
+.topomap-empty { padding: 4px 0; }
+
+.topomap-changes { overflow: auto; padding: 8px 10px; }
+.topomap-changes-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; }
+.topomap-chip { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.topomap-count { opacity: .7; }
+.topomap-ch-table { width: 100%; }
+.topomap-ch-link_removed td:nth-child(2),
+.topomap-ch-ip_changed td:nth-child(2) { color: #e07a2e; }
+.topomap-ch-mac_moved td:nth-child(2) { color: #4796c4; }
+
+div.vis-tooltip .topomap-tip, div.vis-tooltip .topomap-tip * { font-family: Arial, Tahoma, Verdana, sans-serif; }
+.topomap-tip { max-width: 360px; line-height: 1.4; }
+.topomap-tip strong { display: block; margin-bottom: 2px; }
+div.vis-tooltip {
+	font-family: Arial, Tahoma, Verdana, sans-serif;
+	font-size: 12px;
+	padding: 6px 8px;
+	border-radius: 2px;
+	border: 1px solid rgba(127, 127, 127, .4);
+	background: #fff;
+	color: #1f2c33;
+	box-shadow: 0 3px 10px rgba(0, 0, 0, .15);
+	white-space: normal;
+}
+
+@media (max-width: 900px) {
+	.topomap-body { flex-direction: column; }
+	.topomap-pane { min-height: 360px; }
+	.topomap-side { flex: 0 0 auto; max-width: none; border-left: 0; border-top: 1px solid rgba(127, 127, 127, .28); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.topomap-results { scroll-behavior: auto; }
+}
+
+/* 1.0.5: collection status, port detail */
+.topomap-st { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+.topomap-st-ok { background: #59db8f; }
+.topomap-st-wait { background: #7499ff; }
+.topomap-st-err { background: #e45959; }
+.topomap-st-off { background: #97aab3; }
+.topomap-small { font-size: 11px; }
+.topomap-alias { white-space: normal; max-width: 140px; }
+.topomap-sources { margin: 6px 0 4px; }
+.topomap-sources > summary { cursor: pointer; font-weight: bold; padding: 2px 0; }
+.topomap-src { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.topomap-src td { padding: 3px 6px 3px 0; vertical-align: top; border-bottom: 1px solid rgba(127, 127, 127, .15); }
+.topomap-notes { margin: 6px 0; padding: 6px 10px 6px 24px; border-left: 3px solid #7499ff; background: rgba(116, 153, 255, .08); }
+.topomap-notes li { margin: 2px 0; }
+
+/* 1.0.7: long port labels ("via switch gi14") wrap instead of pushing the table wider */
+.topomap-ports .topomap-port { white-space: normal; overflow-wrap: anywhere; }
+.topomap-macs td:last-child { overflow-wrap: anywhere; }
+
+/* 2.0: settings page */
+.topomap-settings { max-width: 980px; padding: 6px 0 20px; }
+.topomap-set-hint { margin-top: 4px; max-width: 640px; opacity: .72; line-height: 1.4; white-space: normal; }
+.topomap-set-head { grid-column: 1 / -1; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(127, 127, 127, .25); }
+.topomap-set-head h4 { margin: 0; font-size: 14px; }
+.topomap-settings textarea { font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 12px; }
+.topomap-btn-link { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; box-sizing: border-box; text-decoration: none; }

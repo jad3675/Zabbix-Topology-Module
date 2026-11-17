@@ -1,0 +1,21 @@
+h1     host       L1 sw1
+h2     host       L0 rtr1
+h3     host       L2 hv1
+u1     unmanaged  L1 Silicondust Engineering / 10.0.0.58
+e2     endpoints  L1 2 devices
+EDGE h2 -> h1
+     bridge/ether9 <-> gi13 [lldp+cdp]
+EDGE h1 -> h3
+     gi14 <-> nic0 [lldp+cdp]
+EDGE h2 -> u1
+     Bridge (LLDP port 0) <-> eth0 [lldp]
+EDGE h2 -> e2
+      <->  [fdb]
+-- sw1
+   gi13 *                   rtr1 bridge/ether9 (LLDP+CDP); Silicondust Engineering 10.0.0.58 (seen through rtr1) | macs=0
+   gi14 *                   hv1 nic0 (LLDP+CDP) | macs=0
+-- rtr1
+   Bridge (LLDP port 0)     sw1 gi13 (LLDP+CDP); Silicondust Engineering 10.0.0.58 eth0 (LLDP) | macs=0
+   ether1                    | macs=2
+-- hv1
+   nic0 *                   sw1 gi14 (LLDP+CDP) | macs=0

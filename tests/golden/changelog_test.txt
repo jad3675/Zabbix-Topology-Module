@@ -1,0 +1,17 @@
+ip_changed    core                10.0.0.5: bb:bb:bb:bb:bb:bb to ee:ee:ee:ee:ee:ee
+link_added    core     LLDP port 8 dist1 Gi0/1 (LLDP)
+link_removed  core     LLDP port 7 dist1 Gi0/1 (LLDP)
+mac_moved     acc-sw1  Gi1/0/2    aa:aa:aa:aa:aa:aa from acc-sw1 Gi1/0/1
+mac_moved     acc-sw2  Gi1/0/5    bb:bb:bb:bb:bb:bb (10.0.0.5) from acc-sw1 Gi1/0/2
+mac_new       acc-sw1  Gi1/0/2    dd:dd:dd:dd:dd:dd
+Array
+(
+    [ip_changed] => 1
+    [link_added] => 1
+    [link_removed] => 1
+    [mac_moved] => 2
+    [mac_new] => 1
+)
+Array
+(
+)

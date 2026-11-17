@@ -1,0 +1,2 @@
+Bridge (LLDP port 0) => sw1 gi14 (LLDP)
+link: Bridge (LLDP port 0) <-> gi14

@@ -1,0 +1,69 @@
+=== endpoints=1
+h1                 host       L0 core-n9k-1
+h2                 host       L1 acc-sw1
+h3                 host       L1 acc-sw2
+u1                 unmanaged  L2 ap-lobby
+u2                 unmanaged  L1 mystery-sw
+e2                 endpoints  L2 3 devices
+e3                 endpoints  L2 1 device
+EDGE h1 -> h2 util=20.0 one_sided=false
+     Ethernet1/12 <-> Te1/1/1 [lldp+cdp]
+EDGE h3 -> u1 util=NULL one_sided=false
+     LLDP port 5 <-> eth0 [lldp]
+EDGE h1 -> h3 util=NULL one_sided=true
+     Ethernet1/13 <-> GigabitEthernet1/0/48 [cdp] one-sided
+EDGE h1 -> u2 util=NULL one_sided=false
+     Ethernet1/14 <-> Gi0/1 [cdp]
+EDGE h2 -> e2 util=NULL one_sided=false
+      <->  [fdb]
+EDGE h3 -> e3 util=NULL one_sided=false
+      <->  [fdb]
+Array
+(
+    [hosts] => 3
+    [external] => 0
+    [unmanaged] => 2
+    [links] => 4
+    [endpoints] => 4
+)
+Array
+(
+)
+=== endpoints=2
+h1                 host       L0 core-n9k-1
+h2                 host       L1 acc-sw1
+h3                 host       L1 acc-sw2
+u1                 unmanaged  L2 ap-lobby
+u2                 unmanaged  L1 mystery-sw
+p2:10101           port       L2 Gi1/0/1 / 2 devices
+p2:10102           port       L2 Gi1/0/2 / 10.1.5.22
+p3:10105           port       L2 Gi1/0/5 / f0:f0:f0:00:00:05
+EDGE h1 -> h2 util=20.0 one_sided=false
+     Ethernet1/12 <-> Te1/1/1 [lldp+cdp]
+EDGE h3 -> u1 util=NULL one_sided=false
+     LLDP port 5 <-> eth0 [lldp]
+EDGE h1 -> h3 util=NULL one_sided=true
+     Ethernet1/13 <-> GigabitEthernet1/0/48 [cdp] one-sided
+EDGE h1 -> u2 util=NULL one_sided=false
+     Ethernet1/14 <-> Gi0/1 [cdp]
+EDGE h2 -> p2:10101 util=NULL one_sided=false
+     Gi1/0/1 <->  [fdb]
+EDGE h2 -> p2:10102 util=NULL one_sided=false
+     Gi1/0/2 <->  [fdb]
+EDGE h3 -> p3:10105 util=NULL one_sided=false
+     Gi1/0/5 <->  [fdb]
+Array
+(
+    [hosts] => 3
+    [external] => 0
+    [unmanaged] => 2
+    [links] => 4
+    [endpoints] => 4
+)
+Array
+(
+)
+Gi1/0/1 nb= macs=[{"m":"005056010203","ip":"10.1.5.20","n":"","t":"","r":false,"v":"VMware"},{"m":"64167f010203","ip":"10.1.5.21","n":"SEP64167F010203","t":"phone","r":false,"v":"Polycom"}]
+Gi1/0/2 nb= macs=[{"m":"aabbcc000001","ip":"10.1.5.22","n":"","t":"","r":true,"v":""}]
+Te1/1/1 nb=core-n9k-1 Ethernet1/12 (LLDP+CDP) macs=[]
+te1/1/1 te1/1/1 eth1/12 eth1/12
