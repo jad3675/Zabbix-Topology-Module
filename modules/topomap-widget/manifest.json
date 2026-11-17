@@ -4,7 +4,7 @@
 	"type": "widget",
 	"name": "Topology",
 	"namespace": "TopoMapWidget",
-	"version": "2.2.2",
+	"version": "2.2.3",
 	"description": "Dashboard widget for the Topology module. Enable the Topology module as well.",
 	"widget": {
 		"name": "Topology",

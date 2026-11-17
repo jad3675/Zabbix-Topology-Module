@@ -13,7 +13,7 @@ use CWebUser;
  */
 class TopologyBuilder {
 
-	public const VERSION = '2.2.2';
+	public const VERSION = '2.2.3';
 
 	private $groupids;
 	private $opt;

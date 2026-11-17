@@ -211,6 +211,7 @@
 			const rows = new Map();
 			const info = new Map();
 			const attached = data.nodes.filter(n => n.kind === 'endpoints');
+			const hasBubble = new Set(attached.map(n => n.parent));
 			data.nodes.forEach(n => {
 				if (n.kind === 'endpoints') {
 					return;
@@ -218,7 +219,8 @@
 				const lvl = typeof n.level === 'number' ? n.level : 0;
 				const label = String(n.label || '').split('\n').reduce((a, b) => a.length > b.length ? a : b, '');
 				const w = (n.kind === 'host' || n.kind === 'external' || n.kind === 'guest') ? label.length * charW + 24 : Math.max(26, label.length * (charW - 1));
-				info.set(n.id, {n: n, lvl: lvl, w: w, up: [], down: [], x: 0});
+				const pad = hasBubble.has(n.id) ? (this.opts.compact ? 62 : 80) : 0;
+				info.set(n.id, {n: n, lvl: lvl, w: w + pad, pad: pad, up: [], down: [], x: 0});
 				if (!rows.has(lvl)) {
 					rows.set(lvl, []);
 				}
@@ -259,6 +261,10 @@
 				levels.slice(1).forEach(l => { rows.set(l, bary(rows.get(l), 'up')); reindex(); });
 				levels.slice(0, -1).reverse().forEach(l => { rows.set(l, bary(rows.get(l), 'down')); reindex(); });
 			}
+			// Finish top-down, so every row ends up ordered by where its parents are. Ending on
+			// the bottom-up sweep let the leaves reorder their parents, which crossed lines in
+			// an otherwise tree-shaped network.
+			levels.slice(1).forEach(l => { rows.set(l, bary(rows.get(l), 'up')); reindex(); });
 
 			// Consecutive nodes with the same parents form a block, laid out as a grid
 			// so a distribution pair with 40 access switches does not become one huge row.
@@ -304,21 +310,33 @@
 				info.get(id).x = b.x - b.w / 2 + b.cell * ((i % b.c) + 0.5) - gap / 2;
 				info.get(id).sub = Math.floor(i / b.c);
 			});
+			// Nodes want to sit under their parents but may not overlap. Pushing the overlaps apart
+			// left-to-right alone drags a whole row rightwards, so do it from both ends and take
+			// the middle: still no overlaps, and the row stays centred under what it hangs from.
 			const pack = (list, want) => {
-				const xs = list.map(want);
-				for (let i = 1; i < list.length; i++) {
-					const min = xs[i - 1] + (list[i - 1].w + list[i].w) / 2 + gap * 2;
-					if (xs[i] < min) {
-						xs[i] = min;
-					}
-				}
-				for (let i = list.length - 2; i >= 0; i--) {
-					const max = xs[i + 1] - (list[i + 1].w + list[i].w) / 2 - gap * 2;
-					if (xs[i] > max) {
-						xs[i] = max;
-					}
-				}
-				list.forEach((b, i) => { b.x = xs[i]; setMembers(b); });
+				const sweep = fromLeft => {
+					const xs = list.map(want);
+					const fwd = () => {
+						for (let i = 1; i < list.length; i++) {
+							const min = xs[i - 1] + (list[i - 1].w + list[i].w) / 2 + gap * 2;
+							if (xs[i] < min) {
+								xs[i] = min;
+							}
+						}
+					};
+					const back = () => {
+						for (let i = list.length - 2; i >= 0; i--) {
+							const max = xs[i + 1] - (list[i + 1].w + list[i].w) / 2 - gap * 2;
+							if (xs[i] > max) {
+								xs[i] = max;
+							}
+						}
+					};
+					if (fromLeft) { fwd(); back(); } else { back(); fwd(); }
+					return xs;
+				};
+				const a = sweep(true), b = sweep(false);
+				list.forEach((blk, i) => { blk.x = (a[i] + b[i]) / 2; setMembers(blk); });
 			};
 			const avg = (ids, fallback) => ids.length ? ids.reduce((sum, x) => sum + info.get(x).x, 0) / ids.length : fallback;
 
@@ -341,13 +359,15 @@
 			});
 			const pos = {};
 			info.forEach((v, id) => { pos[id] = {x: Math.round(v.x), y: rowY[v.lvl] + (v.sub || 0) * subSep}; });
-			// Endpoint bubbles sit below and to the right of their switch, so they never
-			// land on the edge to a child drawn straight underneath.
+			// An endpoint bubble sits beside its switch, in the same row, in space reserved for it.
+			// Lines between rows leave from the middle of a node, so nothing ever runs through a
+			// bubble or its label, however far the row below fans out.
 			attached.forEach(n => {
 				const p = pos[n.parent];
-				const pw = info.has(n.parent) ? info.get(n.parent).w : 80;
-				if (p) {
-					pos[n.id] = {x: p.x + pw / 2 + (this.opts.compact ? 22 : 30), y: p.y + attachOff * 0.7};
+				const v = info.get(n.parent);
+				if (p && v) {
+					p.x = Math.round(p.x - v.pad / 2);
+					pos[n.id] = {x: p.x + (v.w - v.pad) / 2 + v.pad / 2 + 4, y: p.y + 4};
 				}
 			});
 			return pos;
