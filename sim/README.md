@@ -91,3 +91,6 @@ python3 setup.py --url http://zabbix.example/ --token API_TOKEN --sim-host 192.0
 ```
 
 `--proxy NAME` assigns the hosts to a proxy. `--remove` deletes only the hosts this script created, and the group if nothing else is in it. In this mode there are no utilisation colours.
+
+<img width="1895" height="955" alt="image" src="https://github.com/user-attachments/assets/c9694238-5cf3-481d-98b2-64e14c579bd4" />
+
