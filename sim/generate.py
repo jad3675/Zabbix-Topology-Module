@@ -6,7 +6,7 @@ The files hold exactly the tables the topology templates walk: LLDP local and re
 CDP, interface names, the Q-BRIDGE MAC table and, on gateways, ARP.
 """
 import os, random, shutil
-from network import DEVICES, LINKS, CDP, UNMANAGED, ENDPOINTS, WIFI, GUESTS, GATEWAYS
+from network import DEVICES, LINKS, CDP, UNMANAGED, ENDPOINTS, WIFI, GUESTS, GATEWAYS, link_ports
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, 'data')
@@ -20,6 +20,7 @@ random.seed(7)
 mi = lambda m: '.'.join(str(int(m[i:i + 2], 16)) for i in range(0, 12, 2))
 iphex = lambda ip: ''.join('%02x' % int(x) for x in ip.split('.'))
 ports = {d: {} for d in DEVICES}
+for (_d, _p), _i in link_ports().items(): ports[_d][_p] = _i      # link ports first, numbered as setup expects
 def ifx(d, p):
     if p not in ports[d]: ports[d][p] = len(ports[d]) + 1
     return ports[d][p]

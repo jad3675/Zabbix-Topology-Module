@@ -52,3 +52,29 @@ GUESTS = {
 }
 # Which devices answer the ARP walk (layer 3 gateways).
 GATEWAYS = ['core-rtr1', 'core-rtr2']
+
+# Utilisation shown on a link, as a fraction of its speed. Links not listed get a low
+# figure. The demo stack feeds these to Zabbix as interface traffic; nothing measures them.
+UTILISATION = {
+    ('core-rtr1', 'core-rtr2'): .22, ('core-rtr1', 'dist-sw1'): .31, ('core-rtr2', 'dist-sw2'): .57,
+    ('dist-sw1', 'acc-sw2'): .86, ('dist-sw1', 'acc-sw3'): .34, ('dist-sw2', 'acc-sw5'): .41,
+    ('dist-sw2', 'dc-sw1'): .63, ('dc-sw1', 'hv-node1'): .44, ('dc-sw1', 'hv-node2'): .29,
+}
+
+
+def link_ports():
+    """{(device, port): ifIndex} for every link port, in the order generate.py numbers them."""
+    out, count = {}, {}
+    def add(d, p):
+        if (d, p) not in out:
+            count[d] = count.get(d, 0) + 1
+            out[(d, p)] = count[d]
+    for a, ap, b, bp in LINKS:
+        add(a, ap); add(b, bp)
+    for d, port, *_ in UNMANAGED:
+        add(d, port)
+    return out
+
+
+def port_speed(port):
+    return 10_000_000_000 if port.startswith(('Te', 'ens', 'xe')) else 1_000_000_000

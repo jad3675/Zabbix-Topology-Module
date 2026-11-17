@@ -1,19 +1,82 @@
-# Seventeen simulated network devices on one UDP port, one SNMP community per device.
-#   docker compose up -d --build
-# Then run setup.py to create the matching hosts in Zabbix.
+# A complete, throwaway Zabbix with the topology module installed and 17 simulated
+# network devices to map. Nothing here touches an existing Zabbix.
+#
+#   cd sim && docker compose up -d --build
+#   open http://localhost:8080   (Admin / zabbix)   ->  Monitoring > Topology
+#
+# The map fills in about three minutes after the first start. `docker compose logs -f bootstrap`
+# shows progress. `docker compose down -v` removes everything, database included.
+#
+# Lab use only: it runs with Zabbix's default login. Set TOPO_WEB_BIND=127.0.0.1 to keep
+# the web interface off the network, TOPO_WEB_PORT to move it off 8080.
+name: topology-demo
+
+x-db: &db
+  POSTGRES_USER: zabbix
+  POSTGRES_PASSWORD: zabbix
+  POSTGRES_DB: zabbix
+
 services:
-  topology-sim:
-    build: .
-    container_name: topology-sim
-    restart: unless-stopped
-    ports:
-      - "1161:1161/udp"
+  postgres:
+    image: postgres:16-alpine
+    environment: *db
     volumes:
-      - ./data:/data:ro        # regenerate with generate.py, then `docker compose restart`
-    # If Zabbix runs in Docker on this machine, put the simulator on its network and
-    # use the service name as --sim-host instead of publishing the port:
-    # networks: [zabbix]
-# networks:
-#   zabbix:
-#     external: true
-#     name: zabbix-docker_default   # `docker network ls` shows the real name
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix"]
+      interval: 5s
+      retries: 30
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.4-latest
+    environment:
+      <<: *db
+      DB_SERVER_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.4-latest
+    environment:
+      <<: *db
+      DB_SERVER_HOST: postgres
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_NAME: Topology demo
+      PHP_TZ: ${TZ:-UTC}
+    ports:
+      - "${TOPO_WEB_BIND:-0.0.0.0}:${TOPO_WEB_PORT:-8080}:8080"
+    volumes:
+      - ../modules/topomap:/usr/share/zabbix/modules/topomap:ro
+      - ../modules/topomap-widget:/usr/share/zabbix/modules/topomap-widget:ro
+    depends_on:
+      - zabbix-server
+
+  # Seventeen devices on one UDP port, one SNMP community per device (the device name).
+  snmpsim:
+    build: .
+    volumes:
+      - ./data:/data:ro        # regenerate with generate.py, then `docker compose restart snmpsim`
+    # To poll the simulator from a Zabbix outside this stack, publish the port:
+    # ports:
+    #   - "1161:1161/udp"
+
+  # Imports the templates, enables the module, creates the hosts, runs the first walks,
+  # then keeps the demo link-utilisation figures fresh.
+  bootstrap:
+    image: python:3.12-alpine
+    working_dir: /sim
+    command: ["python3", "-u", "bootstrap.py"]
+    environment:
+      ZABBIX_URL: http://zabbix-web:8080/
+      SIM_HOST: snmpsim
+    volumes:
+      - .:/sim:ro
+      - ../templates:/templates:ro
+    depends_on:
+      - zabbix-web
+      - snmpsim
+    restart: unless-stopped
+
+volumes:
+  pgdata:

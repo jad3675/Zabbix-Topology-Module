@@ -94,7 +94,7 @@ The **Data collection** block on each switch shows, per source: OK, waiting for 
 
 ## Try it without a network
 
-`sim/` holds a Docker Compose simulator with 17 SNMP devices (core, distribution, access, access points, hypervisors) and a script that creates the matching hosts in Zabbix. The devices are polled by the real templates. See `sim/README.md`.
+`sim/` is a complete demo: `docker compose up -d --build` starts a throwaway Zabbix 7.4 with this module installed and 17 simulated SNMP devices (core, distribution, access, access points, hypervisors), polled by the real templates. Open `http://localhost:8080`, sign in as Admin / zabbix, and the map is under Monitoring > Topology. See `sim/README.md`.
 
 ## Troubleshooting
 
