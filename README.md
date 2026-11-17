@@ -92,6 +92,10 @@ Monitoring > Topology > **Settings** (Super admin). Stored in the module's own Z
 
 The **Data collection** block on each switch shows, per source: OK, waiting for first poll, error (with Zabbix's text), no new data, not collected, or not supported by this device.
 
+## Try it without a network
+
+`sim/` holds a Docker Compose simulator with 17 SNMP devices (core, distribution, access, access points, hypervisors) and a script that creates the matching hosts in Zabbix. The devices are polled by the real templates. See `sim/README.md`.
+
 ## Troubleshooting
 
 - **A host shows "Not polled".** The panel says why in Zabbix's own terms: it is monitored by a proxy that has stopped contacting the server (with how long ago), its proxy group has no working proxy for it, or it is in a maintenance window with no data collection. Fix that first; nothing in the template can collect until then. The threshold for calling a proxy offline is under Settings > Detection.

@@ -882,7 +882,9 @@ class Correlator {
 				$p['upl'] = (int) $n;
 				unset($p);
 				if (isset($this->linkPorts[$hid][$ifx]) && ($t = $this->behindTarget($hid, $ifx)) !== null) {
-					$hidden[$t][$this->viaKey($hid, $ifx)] = [(int) $n, $this->viaLabel($hid, $ifx)];
+					// Only a count is known for a port over the limit, and the host itself is one of
+					// the addresses learned there, so it is not one of the devices behind it.
+					$hidden[$t][$this->viaKey($hid, $ifx)] = [max(0, (int) $n - 1), $this->viaLabel($hid, $ifx)];
 				}
 			}
 			foreach ($fdb['e'] ?? [] as $ifx => $macs) {

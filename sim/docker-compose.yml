@@ -1,0 +1,19 @@
+# Seventeen simulated network devices on one UDP port, one SNMP community per device.
+#   docker compose up -d --build
+# Then run setup.py to create the matching hosts in Zabbix.
+services:
+  topology-sim:
+    build: .
+    container_name: topology-sim
+    restart: unless-stopped
+    ports:
+      - "1161:1161/udp"
+    volumes:
+      - ./data:/data:ro        # regenerate with generate.py, then `docker compose restart`
+    # If Zabbix runs in Docker on this machine, put the simulator on its network and
+    # use the service name as --sim-host instead of publishing the port:
+    # networks: [zabbix]
+# networks:
+#   zabbix:
+#     external: true
+#     name: zabbix-docker_default   # `docker network ls` shows the real name
